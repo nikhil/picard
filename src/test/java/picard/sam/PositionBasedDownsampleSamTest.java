@@ -18,6 +18,7 @@ import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 import picard.PicardException;
 import picard.cmdline.CommandLineProgramTest;
+import picard.sam.util.SamTestUtil;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -156,22 +157,11 @@ public class PositionBasedDownsampleSamTest extends CommandLineProgramTest {
         assertEquals(validateSamFile.doWork(), 0);
 
         //make sure that the total number of record in the resulting file in in the ballpark:
-        assertGreaterThan(countSamTotalRecord(downsampled), fraction * .8 * countSamTotalRecord(samFile));
-        assertLessThan(countSamTotalRecord(downsampled), fraction * 1.2 * countSamTotalRecord(samFile));
+        assertGreaterThan(SamTestUtil.countSamTotalRecord(downsampled), fraction * .8 * SamTestUtil.countSamTotalRecord(samFile));
+        assertLessThan(SamTestUtil.countSamTotalRecord(downsampled), fraction * 1.2 * SamTestUtil.countSamTotalRecord(samFile));
     }
 
-    private long countSamTotalRecord(final File samFile) {
-        final SamReader reader = SamReaderFactory.make().open(samFile);
-        assert reader.hasIndex();
-        long total = 0;
-
-        for (int i = 0; i < reader.getFileHeader().getSequenceDictionary().size(); i++) {
-            total += reader.indexing().getIndex().getMetaData(i).getAlignedRecordCount();
-            total += reader.indexing().getIndex().getMetaData(i).getUnalignedRecordCount();
-        }
-        return total;
-    }
-
+    
     @DataProvider(name="allowTwiceData")
     public Object[][] allowTwiceData(){
         return new Object[][]{{true},{false}};
