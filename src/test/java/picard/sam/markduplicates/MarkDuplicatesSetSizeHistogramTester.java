@@ -105,11 +105,10 @@ public class MarkDuplicatesSetSizeHistogramTester extends AbstractMarkDuplicates
             // Check contents of set size bin against expected values //
             for (final Histogram<Double> histo : metricsOutput.getAllHistograms()) {
                 String label = histo.getValueLabel();
-                for (Object bin :histo.keySet()) {
+                for (final Double bin :histo.keySet()) {
                     String binStr = bin.toString();
                     if (expectedSetSizeMap.containsKey(Arrays.asList(label,binStr))) {
-                        Histogram<Double>.Bin binValue = histo.get(bin);
-                        double actual = binValue.getValue();
+                        double actual = histo.get(bin).getValue();
                         double expected = expectedSetSizeMap.get(Arrays.asList(label, binStr));
                         Assert.assertEquals(actual, expected);
                     }
