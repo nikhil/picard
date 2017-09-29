@@ -26,9 +26,11 @@
 package picard.fingerprint;
 
 import htsjdk.samtools.BamFileIoUtils;
+import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.samtools.metrics.MetricsFile;
 import htsjdk.samtools.util.IOUtil;
 import htsjdk.samtools.util.Log;
+import htsjdk.variant.utils.SAMSequenceDictionaryExtractor;
 import org.broadinstitute.barclay.help.DocumentedFeature;
 import picard.PicardException;
 import picard.cmdline.CommandLineProgram;
@@ -39,14 +41,12 @@ import picard.cmdline.programgroups.Fingerprinting;
 
 import java.io.*;
 import java.text.NumberFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Collectors.toSet;
 import static picard.fingerprint.CrosscheckMetric.FingerprintResult;
 import static picard.fingerprint.CrosscheckMetric.FingerprintResult.*;
@@ -91,8 +91,11 @@ public class CrosscheckFingerprints extends CommandLineProgram {
     public File MATRIX_OUTPUT = null;
 
     @Argument(shortName = "H", doc = "The file lists a set of SNPs, optionally arranged in high-LD blocks, to be used for fingerprinting. See " +
-            "https://software.broadinstitute.org/gatk/documentation/article?id=9526 for details.")
-    public File HAPLOTYPE_MAP;
+            "https://software.broadinstitute.org/gatk/documentation/article?id=9526 for details." +
+            "Multiple Maps are allowed for cases where different files are based on different references. In this case it is " +
+            "vital that each file be endowed with a reference dictionary (VCF or SAM). The program will match the HAPLOYPE_MAP" +
+            "to use according to the sequence dictionaries.")
+    public List<File> HAPLOTYPE_MAP;
 
     @Argument(shortName = "LOD",
             doc = "If any two groups (with the same sample name) match with a LOD score lower than the threshold " +
@@ -146,15 +149,20 @@ public class CrosscheckFingerprints extends CommandLineProgram {
     protected int doWork() {
         // Check inputs
         INPUT.forEach(IOUtil::assertFileIsReadable);
-        IOUtil.assertFileIsReadable(HAPLOTYPE_MAP);
+        HAPLOTYPE_MAP.forEach(IOUtil::assertFileIsReadable);
+
         if (OUTPUT != null) IOUtil.assertFileIsWritable(OUTPUT);
         if (MATRIX_OUTPUT != null) IOUtil.assertFileIsWritable(MATRIX_OUTPUT);
 
-        final HaplotypeMap map = new HaplotypeMap(HAPLOTYPE_MAP);
-        final FingerprintChecker checker = new FingerprintChecker(map);
+        final Map<SAMSequenceDictionary, HaplotypeMap> map = HAPLOTYPE_MAP.stream()
+                .map(HaplotypeMap::new)
+                .collect(toMap(m->m.getHeader().getSequenceDictionary(), m -> m));
 
-        checker.setAllowDuplicateReads(ALLOW_DUPLICATE_READS);
-        checker.setValidationStringency(VALIDATION_STRINGENCY);
+        final Map<SAMSequenceDictionary, FingerprintChecker> checker = map.entrySet()
+                .stream().collect(toMap(Map.Entry::getKey, e->new FingerprintChecker(e.getValue())));
+
+        checker.values().forEach(c->c.setAllowDuplicateReads(ALLOW_DUPLICATE_READS));
+        checker.values().forEach(c->c.setValidationStringency(VALIDATION_STRINGENCY));
 
         log.info("Done checking input files, moving onto fingerprinting files.");
 
@@ -166,7 +174,21 @@ public class CrosscheckFingerprints extends CommandLineProgram {
 
         final List<File> unrolledFiles = IOUtil.unrollFiles(INPUT, extensions.toArray(new String[extensions.size()]));
 
-        final Map<FingerprintIdDetails, Fingerprint> fpMap = checker.fingerprintFiles(unrolledFiles, NUM_THREADS, 1, TimeUnit.DAYS);
+        Map<File, SAMSequenceDictionary> mapFileToDictionary = unrolledFiles.stream().collect(toMap(f->f, SAMSequenceDictionaryExtractor::extractDictionary));
+
+        // check that the sequence dictionaries found in the files are compatible with those in the haplotype maps.
+        if (map.size() > 1) {
+            mapFileToDictionary.entrySet().forEach(dictAndFile -> {
+                if (map.keySet().stream().noneMatch(dictFromMap -> dictAndFile.getValue().isSameDictionary(dictFromMap))) {
+                    throw new RuntimeException("Couldn't find Haplotype Map with Dictionary equal to that from " + dictAndFile.getKey().getName());
+                }
+            });
+        }
+
+        final List<Map<FingerprintIdDetails, Fingerprint>> fpMapList =
+        mapFileToDictionary.entrySet().stream().map(e->checker.get(e.getValue()).fingerprintFiles(Collections.singletonList(e.getKey()), NUM_THREADS, 1, TimeUnit.DAYS)).collect(Collectors.toList());
+
+        final Map<FingerprintIdDetails, Fingerprint> fpMap = fpMapList.stream().flatMap(m -> m.entrySet().stream()).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         log.info("Finished generating fingerprints from files, moving on to cross-checking.");
 
@@ -241,6 +263,9 @@ public class CrosscheckFingerprints extends CommandLineProgram {
                 break;
             case SAMPLE:
                 groupByTemp = details -> details.sample;
+                break;
+            case FILE_AND_SAMPLE:
+                groupByTemp = details -> details.file + "::" + details.sample;
                 break;
             default:
                 throw new PicardException("unpossible");

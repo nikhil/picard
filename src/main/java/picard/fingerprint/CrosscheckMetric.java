@@ -60,6 +60,7 @@ public class CrosscheckMetric extends MetricBase {
     }
 
     public enum DataType {
+        FILE_AND_SAMPLE,
         FILE,
         SAMPLE,
         LIBRARY,
