@@ -277,6 +277,12 @@ public class FingerprintChecker {
         for (final String sample : fingerprints.keySet()) {
             final Fingerprint fp = fingerprints.get(sample);
 
+            // TODO: check that the sample's alleles are consistent with those of the HP.
+
+            // TODO: subset the genotype context to the alleles in the HP. In the case that
+            // TODO: the sample is genotyped as HOM for an allele that is in the HP, we take
+            // TODO: the rest of the evidence and put it on the other allele.
+
             //PLs are preferred over GTs
             //TODO: this code is replicated in various places (ReconstructTriosFromVCF for example). Needs refactoring.
             //TODO: add a way to force using GTs when both are available (why?)
